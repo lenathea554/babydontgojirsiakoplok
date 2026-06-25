@@ -1,0 +1,16 @@
+{
+    "free": {
+        "version": "3.2.3",
+        "force": false,
+        "changelog": [
+            "Fixed teleport issues in Treasure Hunt and Teleport Location modules"
+        ]
+    },
+    "premium": {
+        "version": "3.2.3",
+        "force": false,
+        "changelog": [
+            "Fixed teleport issues in Treasure Hunt and Teleport Location modules"
+        ]
+    }
+}
