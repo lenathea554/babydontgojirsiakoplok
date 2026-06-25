@@ -1,0 +1,684 @@
+-- ===========================================
+-- NEXTHUB MAIN ENTRY
+-- ===========================================
+
+if _G._NEXTHUB then
+    pcall(function() _G._NEXTHUB.cleanup() end)
+    task.wait(0.2)
+end
+
+local _genv = getgenv()
+if rawget(_genv, "NEXTHUB_MAIN_RUNNING") then
+    return
+end
+rawset(_genv, "NEXTHUB_MAIN_RUNNING", true)
+
+_G._NEXTHUB = {
+    conns = {},
+    tasks = {},
+    instances = {},
+    updateShown = false,
+
+    cleanup = function()
+        for i = #_G._NEXTHUB.conns, 1, -1 do
+            local c = _G._NEXTHUB.conns[i]
+            pcall(function()
+                if c and c.Connected then
+                    c:Disconnect()
+                end
+            end)
+        end
+
+        for i = #_G._NEXTHUB.tasks, 1, -1 do
+            local t = _G._NEXTHUB.tasks[i]
+            pcall(function()
+                if t then
+                    task.cancel(t)
+                end
+            end)
+        end
+
+        for i = #_G._NEXTHUB.instances, 1, -1 do
+            local inst = _G._NEXTHUB.instances[i]
+            pcall(function()
+                if inst and inst.Parent then
+                    inst:Destroy()
+                end
+            end)
+        end
+
+        _G._NEXTHUB.conns = {}
+        _G._NEXTHUB.tasks = {}
+        _G._NEXTHUB.instances = {}
+        _G._NEXTHUB = nil
+
+        rawset(getgenv(), "NEXTHUB_MAIN_RUNNING", nil)
+    end
+}
+
+local NextUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/ardho206/ui/refs/heads/main/NextHub/NextUI.lua"))()
+
+local service = {
+    ReplicatedStorage = game:GetService("ReplicatedStorage"),
+    Workspace         = game:GetService("Workspace"),
+    Players           = game:GetService("Players"),
+    RunService        = game:GetService("RunService"),
+    TweenService      = game:GetService("TweenService"),
+    StarterGui        = game:GetService("StarterGui"),
+    HttpService       = game:GetService("HttpService"),
+    Lighting          = game:GetService("Lighting")
+}
+
+local NetModule = service.ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net
+local NetFolder = service.ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net
+
+local oldidentity = getthreadidentity()
+
+setthreadidentity(5)
+
+local NetClone    = NetModule:Clone()
+local ModifiedNet = require(NetClone)
+
+task.wait(1)
+
+_G.Net = {}
+
+local function startStrictMapping()
+    local allChildren = NetFolder:GetChildren()
+
+    for _, child in ipairs(allChildren) do
+        local fullName = child.Name
+        local prefix   = string.sub(fullName, 1, 3)
+
+        if (prefix == "RF/" or prefix == "RE/") then
+            local cleanName = string.sub(fullName, 4)
+
+            if #cleanName < 30 then
+                local remoteFromClone = nil
+                if prefix == "RF/" then
+                    pcall(function() remoteFromClone = ModifiedNet:RemoteFunction(cleanName) end)
+                else
+                    pcall(function() remoteFromClone = ModifiedNet:RemoteEvent(cleanName) end)
+                end
+
+                if remoteFromClone then
+                    local hashedNameFromServer = remoteFromClone.Name
+                    local realPhysicalRemote   = NetFolder:FindFirstChild(hashedNameFromServer)
+
+                    if realPhysicalRemote then
+                        _G.Net[cleanName] = realPhysicalRemote
+                    else
+                        warn("[Fail] Objek " .. hashedNameFromServer .. " tidak ditemukan di folder Net fisik.")
+                    end
+                end
+            end
+        end
+    end
+end
+
+pcall(startStrictMapping)
+
+setthreadidentity(oldidentity)
+
+-- ================================================================
+-- START MODULE
+-- ================================================================
+
+----------------------------------------------------------------
+-- TELEPORT LOCATION MODULE
+----------------------------------------------------------------
+local Players           = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local LP                = Players.LocalPlayer
+
+local TeleportLocation = {}
+
+local LOCATIONS = {
+    ["Ancient Jungle"]       = CFrame.new(1467.848,   7.447  + 3,  -327.597),
+    ["Ancient Ruin"]         = CFrame.new(6045.402,  -588.600 + 3, 4608.937),
+    ["Coral Reefs"]          = CFrame.new(-2921.858,   3.25  + 3,  2083.297),
+    ["Crater Island"]        = CFrame.new(1078.454,    5.072 + 3,  5099.396),
+    ["Esoteric Depths"]      = CFrame.new(3224.075, -1302.854 + 3, 1404.934),
+    ["Enchant 1"]            = CFrame.new(3234.833, -1302.855 + 3, 1398.39233),
+    ["Enchant 2"]            = CFrame.new(1480.562,   127.624 + 3,  -587.132),
+    ["Fisherman Island"]     = CFrame.new(92.806,      9.531 + 3,  2762.082),
+    ["Kohana"]               = CFrame.new(-643.305,   16.035 + 3,   622.360),
+    ["Kohana Volcano"]       = CFrame.new(-511.569,   17.535 + 3,   155.349),
+    ["Volcanic Cavern"]      = CFrame.new(1098,        85.856 + 3, -10239),
+    ["Lost Isle"]            = CFrame.new(-3701.151,   5.425 + 3, -1058.910),
+    ["Lava Basin"]           = CFrame.new(875.891,     85.522 + 3,-10086.71),
+    ["Sysiphus Statue"]      = CFrame.new(-3656.562, -134.531 + 3,  -964.316),
+    ["Sacred Temple"]        = CFrame.new(1476.308,   -21.849 + 3,  -630.822),
+    ["Treasure Room"]        = CFrame.new(-3601.568, -266.573 + 3, -1578.998),
+    ["Tropical Grove"]       = CFrame.new(-2104.467,    6.268 + 3,  3718.254),
+    ["Underground Cellar"]   = CFrame.new(2162.577,   -91.198 + 3,  -725.591),
+    ["Weather Machine"]      = CFrame.new(-1513.924,    6.5   + 3,  1892.106),
+    ["Pirate Cove"]          = CFrame.new(3338.228,     4.19  + 3,  3525.695),
+    ["Crystal Depths"]       = CFrame.new(5750.214,   -904.81 + 3, 15393.308),
+    ["Secret Passage"]       = CFrame.new(3432.08,    -299.34 + 3,  3358.65),
+    ["Pirate Treasure Room"] = CFrame.new(3339.784,   -302.044 + 3, 3090.016),
+    ["Sewers"]               = CFrame.new(-1442.80,  -1041.58 + 3,-10447.11),
+    ["Underwater City"]      = CFrame.new(-3148.34,   -640.61 + 3,-10506.08),
+    ["Copper Canyon"]        = CFrame.new(-4134.40,     8.25  + 3,    620.45),
+}
+
+local locationNames = {}
+for name in pairs(LOCATIONS) do table.insert(locationNames, name) end
+table.sort(locationNames)
+
+local selectedLoc    = nil
+local selectedBoatId = nil
+
+----------------------------------------------------------------
+-- UTILITIES
+----------------------------------------------------------------
+
+local function getNet(name)
+    return _G.Net and _G.Net[name]
+end
+
+local function waitForCharReady(timeout)
+    local elapsed = 0
+    while elapsed < timeout do
+        local char = LP.Character
+        if char
+            and char:FindFirstChild("HumanoidRootPart")
+            and char:FindFirstChildOfClass("Humanoid")
+            and char.Parent ~= nil
+        then
+            return char
+        end
+        task.wait(0.2)
+        elapsed = elapsed + 0.2
+    end
+    return LP.Character
+end
+
+local function respawnCharacter()
+    local char = LP.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.Health = 0
+    else
+        char:BreakJoints()
+    end
+end
+
+local function waitForMyBoat(timeout)
+    local elapsed = 0
+    while elapsed < timeout do
+        for _, boat in ipairs(CollectionService:GetTagged("Boat")) do
+            local owner = boat:GetAttribute("OwnerId")
+            if owner and owner == LP.UserId then
+                return boat
+            end
+        end
+        task.wait(0.3)
+        elapsed = elapsed + 0.3
+    end
+    return nil
+end
+
+local function fireBoatTeleport()
+    local re = getNet("BoatTeleport")
+    if re then
+        pcall(function() re:FireServer() end)
+    end
+end
+
+local function spawnBoat(boatId)
+    local rf = getNet("SpawnBoat")
+    if not rf then return false end
+    local ok, result = pcall(function() return rf:InvokeServer(boatId) end)
+    return ok and result
+end
+
+local function despawnMyBoat()
+    local rf = getNet("DespawnBoat")
+    if rf then pcall(function() rf:InvokeServer() end) end
+end
+
+local function getBoatBase(boat)
+    return boat:FindFirstChild("Base")
+end
+
+local function getBoatSpeed(boatName)
+    local ok, handlingData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.BoatsHandlingData)
+    end)
+    if ok and handlingData and handlingData[boatName] then
+        return handlingData[boatName].Speed or 200
+    end
+    return 200
+end
+
+local function setCharacterTouchEnabled(enabled)
+    local char = LP.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanTouch = enabled
+        end
+    end
+end
+
+local function simulateReverse(boat, boatName)
+    local base = getBoatBase(boat)
+    if not base then
+        return
+    end
+    local lv = base:FindFirstChildWhichIsA("LinearVelocity")
+    if not lv then
+        return
+    end
+
+    local maxSpeed        = getBoatSpeed(boatName)
+    local reverseSpeed    = maxSpeed * 0.25
+    local reverseDuration = 50 / reverseSpeed
+
+    local elapsed = 0
+    local conn
+
+    lv.VectorVelocity = Vector3.new(reverseSpeed, 0, 0)
+
+    conn = RunService.Heartbeat:Connect(function(dt)
+        elapsed = elapsed + dt
+        if not base or not base.Parent or not lv or not lv.Parent then
+            conn:Disconnect()
+            return
+        end
+        lv.VectorVelocity = lv.VectorVelocity:Lerp(
+            Vector3.new(reverseSpeed, 0, 0), dt * 3)
+        if elapsed >= reverseDuration then
+            conn:Disconnect()
+            lv.VectorVelocity = Vector3.new(0, 0, 0)
+        end
+    end)
+
+    task.wait(reverseDuration + 0.8)
+    if lv and lv.Parent then
+        lv.VectorVelocity = Vector3.new(0, 0, 0)
+    end
+end
+
+local function relocateAndLock(boat, targetCF)
+    local base = getBoatBase(boat)
+    if not base then
+        pcall(function() boat:PivotTo(targetCF) end)
+        return { Disconnect = function() end }
+    end
+
+    pcall(function() base.Anchored = false end)
+    pcall(function()
+        base.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        base.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    end)
+    pcall(function() base.CFrame = targetCF end)
+    pcall(function() base.Anchored = true end)
+    pcall(function()
+        base.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        base.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    end)
+
+    local holdConn = RunService.Heartbeat:Connect(function()
+        if not base or not base.Parent then return end
+        pcall(function() base.CFrame = targetCF end)
+        base.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        base.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    end)
+
+    local inlineElapsed = 0
+    local inlineDone    = false
+    local inlineConn
+
+    inlineConn = RunService.Heartbeat:Connect(function(dt)
+        inlineElapsed = inlineElapsed + dt
+        if not base or not base.Parent then
+            inlineConn:Disconnect()
+            return
+        end
+
+        pcall(function() base.CFrame = targetCF end)
+        base.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        base.AssemblyAngularVelocity = Vector3.new(0,0,0)
+        if inlineElapsed >= 2.5 and not inlineDone then
+            inlineDone = true
+            inlineConn:Disconnect()
+        end
+    end)
+
+    local pollElapsed = 0
+    while not inlineDone and pollElapsed < 4.0 do
+        task.wait(0.1)
+        pollElapsed = pollElapsed + 0.1
+    end
+    if inlineConn then pcall(function() inlineConn:Disconnect() end) end
+
+    return holdConn
+end
+
+local function jumpCharacter()
+    local char = LP.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+
+    if hum then
+        hum.Sit = false
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+    if hrp then
+        for _, obj in ipairs(hrp:GetChildren()) do
+            if obj.Name == "SeatWeld" and (obj:IsA("Weld") or obj:IsA("Motor6D")) then
+                pcall(function() obj:Destroy() end)
+            end
+        end
+    end
+
+    task.wait(0.1)
+
+    char = LP.Character
+    hum  = char and char:FindFirstChildOfClass("Humanoid")
+    hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if hum and hrp then
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Jumping) end)
+        pcall(function()
+            hrp.AssemblyLinearVelocity = Vector3.new(
+                hrp.AssemblyLinearVelocity.X,
+                math.max(hrp.AssemblyLinearVelocity.Y, hum.JumpPower or 50),
+                hrp.AssemblyLinearVelocity.Z
+            )
+        end)
+    end
+end
+
+local function tweenCharToTarget(targetCF)
+    local char = LP.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+
+    if not hrp then
+        return
+    end
+
+    if hum then
+        hum.Sit = false
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+    for _, obj in ipairs(hrp:GetChildren()) do
+        if obj.Name == "SeatWeld" and (obj:IsA("Weld") or obj:IsA("Motor6D")) then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+
+    pcall(function() hrp.Anchored = true end)
+    pcall(function()
+        hrp.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    end)
+
+    local tween = TweenService:Create(hrp,
+        TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { CFrame = targetCF }
+    )
+
+    tween:Play()
+    tween.Completed:Wait()
+
+    pcall(function() hrp.Anchored = false end)
+    pcall(function()
+        hrp.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+        hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    end)
+
+    char = LP.Character
+    hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+end
+
+----------------------------------------------------------------
+-- PIPELINE
+----------------------------------------------------------------
+function TeleportLocation.Teleport(name, boatId)
+    name   = name   or selectedLoc
+    boatId = boatId or selectedBoatId
+
+    local targetCF = LOCATIONS[name]
+    if not targetCF or not boatId then
+        return
+    end
+
+    respawnCharacter()
+    local char = waitForCharReady(14)
+    if not char then
+        return
+    end
+
+    task.wait(3.0)
+
+    local spawned = spawnBoat(boatId)
+    if not spawned then
+        return
+    end
+
+    task.wait(5.0)
+    local boat = waitForMyBoat(10)
+    if not boat then
+        return
+    end
+    local boatName = boat.Name
+    task.wait(1.0)
+
+    fireBoatTeleport()
+    task.wait(7.0)
+    char = LP.Character
+    if not char then
+        return
+    end
+    local hum4 = char:FindFirstChildOfClass("Humanoid")
+    task.wait(0.5)
+
+    simulateReverse(boat, boatName)
+    task.wait(1.0)
+
+    setCharacterTouchEnabled(false)
+    task.wait(0.1)
+
+    local holdConn = relocateAndLock(boat, targetCF)
+    task.wait(0.5)
+
+    jumpCharacter()
+    task.wait(2.0)
+
+    setCharacterTouchEnabled(true)
+
+    fireBoatTeleport()
+    task.wait(4.0)
+
+    jumpCharacter()
+    task.wait(1.5)
+
+    tweenCharToTarget(targetCF)
+
+    if holdConn then
+        pcall(function() holdConn:Disconnect() end)
+    end
+    task.wait(0.5)
+    despawnMyBoat()
+end
+
+function TeleportLocation.GetAllLocations() return locationNames end
+function TeleportLocation.SetLocation(name)  selectedLoc    = name end
+function TeleportLocation.SetBoatId(id)      selectedBoatId = id   end
+
+-- return TeleportLocation
+
+-- ================================================================
+-- END MODULE
+-- ================================================================
+
+-- ================================================================
+-- WINDOW GUI CONFIGURATION
+-- ================================================================
+local Window = NextUI:CreateWindow({
+    Title   = "NextHub",
+    Version = "V1.2.8",
+    Game    = "Fish It!",
+    Update  = "Stable",
+    Mode    = "Premium",
+})
+
+local Notifier = function(title, desc, duration)
+    Window:Notify({
+        Title    = title or "NextHub",
+        Content  = desc,
+        Duration = duration or 5,
+    })
+end
+
+local Tabs = {
+    About   = Window:AddTab({ Title = "| About",   Icon = "solar:info-square-bold" }),
+    Feature = Window:AddTab({ Title = "| Feature", Icon = "fish" }),
+}
+
+-- ── TAB: ABOUT ──
+Tabs.About:AddSection({ Title = "Information" })
+Tabs.About:AddParagraph({
+    Title = "About NextHub",
+    Text  = "<font color='rgb(100, 180, 255)'>NextHub</font> is a roblox script hub.\nThis script is fully optimized to bypass vehicle checks."
+})
+
+Tabs.About:AddButton({
+    Title    = "Copy Link Discord",
+    Callback = function()
+        local link = "https://discord.gg/nexthub"
+        if setclipboard then
+            setclipboard(link)
+            Notifier("Success", "Link copied to clipboard!")
+        else
+            Notifier("Error", "Executor not support clipboard")
+        end
+    end
+})
+
+-- ── TAB: FEATURE ──
+do
+    local Features = Tabs.Feature
+    Features:AddSection({ Title = "Boat Config" })
+
+    local BOAT_LIST = (function()
+        local RS   = game:GetService("ReplicatedStorage")
+        local ok, ItemUtility = pcall(function()
+            return require(RS.Shared.ItemUtility)
+        end)
+
+        if ok and ItemUtility and ItemUtility.GetBoats then
+            local boats = ItemUtility:GetBoats()
+            local names = {}
+            for _, b in ipairs(boats) do
+                table.insert(names, b.Data.Name)
+            end
+            table.sort(names)
+            return names
+        end
+
+        return {
+            "Starter Boat",
+            "Fishing Boat",
+            "Speed Boat",
+            "Yacht",
+            "Galleon",
+        }
+    end)()
+
+    local function resolveBoatId(displayName)
+        local RS = game:GetService("ReplicatedStorage")
+        local ok, ItemUtility = pcall(function()
+            return require(RS.Shared.ItemUtility)
+        end)
+        if ok and ItemUtility and ItemUtility.GetBoats then
+            for _, b in ipairs(ItemUtility:GetBoats()) do
+                if b.Data.Name == displayName then
+                    return b.Data.Id
+                end
+            end
+        end
+        return nil
+    end
+ 
+    local selectedBoatName = nil
+    local confirmedBoatId  = nil
+ 
+    local BoatDropdown = Features:AddDropdown("BoatConfigSelect", {
+        Title         = "Select Boat",
+        Options       = BOAT_LIST,
+        Default       = nil,
+        SearchEnabled = true,
+        Callback      = function(v)
+            selectedBoatName = type(v) == "table" and v[1] or v
+        end
+    })
+ 
+    Features:AddButton({
+        Title    = "Select Boat",
+        Callback = function()
+            if not selectedBoatName then
+                Notifier("Boat Config", "Pick a boat first", 4)
+                return
+            end
+            local id = resolveBoatId(selectedBoatName)
+            if not id then
+                Notifier("Boat Config", "Boat ID not found — check ItemUtility", 5)
+                return
+            end
+            confirmedBoatId = id
+
+            if TeleportLocation then TeleportLocation.SetBoatId(id) end
+            -- if TeleportEventModule    then TeleportEventModule.SetBoatId(id) end
+            -- if TeleportPlayerModule   then TeleportPlayerModule.SetBoatId(id) end
+            Notifier("Boat Config", ("Boat set: %s"):format(selectedBoatName), 4)
+        end
+    })
+ 
+    -- ── Teleport Location ──────────────────────────────────────────────
+    if TeleportLocation then
+        Features:AddSection({ Title = "Location" })
+ 
+        local selectedLocation = nil
+ 
+        Features:AddDropdown("LocationSelect", {
+            Title         = "Select Location",
+            Options       = TeleportLocation.GetAllLocations(),
+            Default       = nil,
+            SearchEnabled = true,
+            Callback      = function(v)
+                selectedLocation = type(v) == "table" and v[1] or v
+                TeleportLocation.SetLocation(selectedLocation)
+            end
+        })
+ 
+        Features:AddButton({
+            Title    = "Teleport To",
+            Callback = function()
+                if not selectedLocation then
+                    Notifier("Error", "No location selected", 5)
+                    return
+                end
+                if not confirmedBoatId then
+                    Notifier("Error", "Select & confirm a boat first", 5)
+                    return
+                end
+                Notifier("Teleport", "Teleporting to " .. selectedLocation .. "...", 5)
+                task.spawn(function()
+                    TeleportLocation.Teleport(selectedLocation, confirmedBoatId)
+                end)
+            end
+        })
+    end
+end
